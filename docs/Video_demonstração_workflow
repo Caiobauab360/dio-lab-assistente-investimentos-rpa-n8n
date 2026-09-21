@@ -2,4 +2,3 @@
 
 [![Assista no Loom](https://www.loom.com/share/687aa1f22139480ab24808842acb8534)
 
-> 💡 **Clique no botão acima** para assistir ao vídeo demonstrativo com o fluxo rodando de ponta a ponta (Raspagem em Python ➔ Webhook n8n ➔ LLM Gemini ➔ Validação Regex ➔ Disparo Gmail ➔ Logs Google Sheets).
