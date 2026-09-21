@@ -1,0 +1,668 @@
+{
+  "name": "RPA-AI-Investment-Assistant-Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "Clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "69877410-ec0f-4c17-b357-f9811b588d5d",
+      "name": "Gatilho - Entrada de Dados",
+      "webhookId": "8e2bce71-1b42-49e7-93ab-6c8aa64fa2d4"
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/digitalinnovationone/dio-lab-assistente-investimentos-rpa-n8n/main/docs/data.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        208,
+        0
+      ],
+      "id": "b0ce01d6-e2d1-4fb1-88d3-ade7584703f2",
+      "name": "Buscar Catálogo de Produtos"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o CSV como texto vindo do HTTP Request\nconst csvRaw = $json.data ?? $json.body ?? $json;\nconst text = (typeof csvRaw === \"string\") ? csvRaw : JSON.stringify(csvRaw);\n\nconst lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);\nconst headers = lines[0].split(\",\").map(h => h.trim());\n\nconst investimentos = lines.slice(1).map(line => {\n  const cols = line.split(\",\").map(c => c.trim());\n  const obj = {};\n  headers.forEach((h, i) => obj[h] = cols[i] ?? \"\");\n\n  // normaliza mínimo para número\n  obj.minimo = Number(String(obj.minimo).replace(/[^\\d]/g, \"\")) || 0;\n\n  return obj;\n});\n\nreturn [{ json: { investimentos } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "fd2aca05-9dab-4e55-8b0d-667412fc5f5f",
+      "name": "Parsear Catálogo JSON"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        608,
+        -128
+      ],
+      "id": "611c389b-eab6-4522-bd02-654e6936cf58",
+      "name": "Consolidar Dados (Entrada + Produtos)"
+    },
+    {
+      "parameters": {
+        "jsCode": "function pick(arr) {\n  return arr[Math.floor(Math.random() * arr.length)];\n}\n\n// Extrai clientes do body e investimentos do objeto raiz\nconst clientes = $input.first().json.body?.clientes || [];\nconst investimentos = $input.first().json.investimentos || [];\n\nconst resultados = clientes.map(function(c) {\n  const nome = c.nome;\n  const email = c.email;\n  const perfil = c.perfil;\n  \n  // Trata o valor numérico do saldo\n  const saldoNum = Number(String(c.saldo).replace(/[^\\d]/g, \"\")) / 100 || 0;\n\n  // Busca o investimento correspondente ao perfil\n  const escolhido = investimentos.find(function(i) {\n    return String(i.perfil).toLowerCase() === String(perfil).toLowerCase();\n  }) || null;\n\n  let motivo = \"sem_investimento\";\n  let mensagens = [];\n\n  if (escolhido) {\n    if (saldoNum >= escolhido.minimo) {\n      motivo = \"saldo_ok\";\n      \n      const prod = escolhido.produto;\n      const minFormatado = \"R$ \" + Number(escolhido.minimo).toLocaleString(\"pt-BR\", { minimumFractionDigits: 2 });\n      const rent = escolhido.rentabilidade;\n      const saldoTexto = c.saldo;\n\n      mensagens = [\n        \"Olá \" + nome + \"! Pelo seu perfil (\" + perfil + \"), uma boa opção é **\" + prod + \"** (mínimo \" + minFormatado + \"). Com seu saldo atual (\" + saldoTexto + \"), você já consegue investir. Rentabilidade: \" + rent + \".\",\n        \"Oi \" + nome + \"! Recomendação para perfil \" + perfil + \": **\" + prod + \"** (mínimo \" + minFormatado + \"). Seu saldo (\" + saldoTexto + \") já atende o mínimo. Rentabilidade: \" + rent + \".\",\n        nome + \", indo direto ao ponto: para o perfil \" + perfil + \", **\" + prod + \"** (mínimo \" + minFormatado + \"). Você tem \" + saldoTexto + \", então dá pra aplicar. Rentabilidade: \" + rent + \".\"\n      ];\n    } else {\n      motivo = \"saldo_insuficiente\";\n      mensagens = [\n        \"Olá \" + nome + \", seu perfil é \" + perfil + \", mas o saldo atual (\" + c.saldo + \") está abaixo do mínimo necessário.\"\n      ];\n    }\n  }\n\n  return {\n    nome: nome,\n    email: email,\n    perfil: perfil,\n    saldo_texto: c.saldo,\n    saldo_num: saldoNum,\n    recomendacao: escolhido,\n    motivo: motivo,\n    mensagens: mensagens,\n    mensagem_escolhida: pick(mensagens)\n  };\n});\n\nreturn [{\n  json: {\n    ok: true,\n    total_clientes: resultados.length,\n    total_investimentos: investimentos.length,\n    resultados: resultados\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ],
+      "id": "71d454b5-e711-4e9a-81e4-cb835f5876bb",
+      "name": "Mapear Regras de Investimento"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resultados = $json.resultados || [];\n\nfunction parseBRL(valor) {\n  if (!valor) return 0;\n  const s = String(valor)\n    .replace(\"R$\", \"\")\n    .replace(/\\./g, \"\")\n    .replace(\",\", \".\")\n    .replace(/[^\\d.]/g, \"\")\n    .trim();\n  const n = Number(s);\n  return Number.isFinite(n) ? n : 0;\n}\n\n// retorna UM ITEM por cliente\nconst out = resultados.map(c => {\n  const saldoNum = c.saldo_num ?? parseBRL(c.saldo_texto ?? c.saldo);\n\n  return {\n    json: {\n      email_to: String(c.email || \"\").trim(),\n      nome: String(c.nome || \"\").trim(),\n      perfil: c.perfil,\n      saldo_texto: c.saldo_texto ?? c.saldo,\n      saldo_num: saldoNum,\n      recomendacao: c.recomendacao,\n      motivo: c.motivo,\n      mensagem_base: c.mensagem_escolhida || c.mensagem || \"\",\n      copy_rules: {\n        idioma: \"pt-BR\",\n        tom: \"amigável e profissional\",\n        tamanho: \"curto (4-6 linhas)\",\n        evitar: [\"promessas de ganho\", \"garantias\", \"linguagem agressiva\"]\n      }\n    }\n  };\n});\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        0
+      ],
+      "id": "5b8876be-b5e4-400b-91f0-26e3466b8396",
+      "name": "Montar Prompts para IA"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-flash-lite-latest",
+          "mode": "list",
+          "cachedResultName": "models/gemini-flash-lite-latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Escreva um e-mail curto em pt-BR para o cliente abaixo, sem prometer ganhos e sem garantias.\n\nCliente:\nNome: {{ $json.nome }}\nPerfil: {{ $json.perfil }}\nSaldo: {{ $json.saldo_texto }}\n\nRecomendação:\nProduto: {{ $json.recomendacao.produto }}\nMínimo: {{ $json.recomendacao.minimo }}\nRentabilidade: {{ $json.recomendacao.rentabilidade }}\nMotivo: {{ $json.motivo }}\n\nMensagem base:\n{{ $json.mensagem_base }}\n\nRetorne APENAS JSON com:\n{\n  \"subject\": \"...\",\n  \"text_body\": \"...\",\n  \"html_body\": \"...\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1168,
+        -128
+      ],
+      "id": "44041678-07dd-4f7c-a355-5fcddd3786e2",
+      "name": "Gerar Comunicação via IA (Gemini)",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "HlLUgLqCXfqleevt",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  // Pega os dados brutos da IA\n  let text = item.json.content?.parts?.[0]?.text || item.json.text || \"\";\n\n  // Remove formatações Markdown do JSON\n  text = text.replace(/```json\\s*/g, \"\").replace(/```\\s*/g, \"\").trim();\n\n  let parsed = {};\n  try {\n    parsed = JSON.parse(text);\n  } catch (e) {\n    parsed = {\n      subject: \"Oportunidade de Investimento\",\n      text_body: text,\n      html_body: `<p>${text}</p>`\n    };\n  }\n\n  // Pega as informações do cliente vindas do nó anterior (se existirem)\n  const j = item.json;\n\n  return {\n    json: {\n      ok: true,\n      to: j.email || j.to || \"\",\n      subject: parsed.subject || \"\",\n      text_body: parsed.text_body || \"\",\n      html_body: parsed.html_body || \"\",\n      meta: {\n        nome: j.nome,\n        perfil: j.perfil,\n        produto: j.recomendacao?.produto,\n        minimo: j.recomendacao?.minimo,\n        rentabilidade: j.recomendacao?.rentabilidade,\n        motivo: j.motivo\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "fede3f16-8a37-473c-9881-b26d1caeec92",
+      "name": "Tratar Resposta da IA (Parse JSON)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dd046261-8e56-4f95-8272-0e5dc120e03d",
+              "leftValue": "={{ $json.to }}",
+              "rightValue": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1696,
+        0
+      ],
+      "id": "0555e123-cbdd-47c9-89fc-92c757028b2c",
+      "name": "Validar Formato do E-mail"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html_body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        -128
+      ],
+      "id": "5b645b58-2ed6-463c-8702-6e03cb1980fe",
+      "name": "Enviar E-mail ao Cliente (Gmail)",
+      "webhookId": "7eca8032-7221-4278-84a1-d69501593676",
+      "alwaysOutputData": false,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "oEdNe9xHEbMS9TAY",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1i8RBGpcj3DpwdcdB3zJrds7jokW5g_EE05jQlFVct1o",
+          "mode": "list",
+          "cachedResultName": "Logs de Envios - Recomendações de Investimento",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1i8RBGpcj3DpwdcdB3zJrds7jokW5g_EE05jQlFVct1o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2126901332,
+          "mode": "list",
+          "cachedResultName": "Page 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1i8RBGpcj3DpwdcdB3zJrds7jokW5g_EE05jQlFVct1o/edit#gid=2126901332"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Data/Hora": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}",
+            "Nome": "={{ $('Montar Prompts para IA').item.json.nome }}",
+            "E-mail": "={{ $('Tratar Resposta da IA (Parse JSON)').item.json.to }}",
+            "Produto": "={{ $('Montar Prompts para IA').item.json.recomendacao.produto }}",
+            "Status": "Enviado",
+            "Assunto": "={{ $('Tratar Resposta da IA (Parse JSON)').item.json.subject }}",
+            "Saldo": "={{ $('Montar Prompts para IA').item.json.saldo_texto }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Data/Hora",
+              "displayName": "Data/Hora",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Nome",
+              "displayName": "Nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "E-mail",
+              "displayName": "E-mail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Produto",
+              "displayName": "Produto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Saldo",
+              "displayName": "Saldo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assunto",
+              "displayName": "Assunto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2112,
+        -128
+      ],
+      "id": "c2bbaebd-e6bb-4690-b3fb-2af5c354300a",
+      "name": "Registrar Log (Sucesso)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pi1hUfnFhIDP3lTU",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1i8RBGpcj3DpwdcdB3zJrds7jokW5g_EE05jQlFVct1o",
+          "mode": "list",
+          "cachedResultName": "Logs de Envios - Recomendações de Investimento",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1i8RBGpcj3DpwdcdB3zJrds7jokW5g_EE05jQlFVct1o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2126901332,
+          "mode": "list",
+          "cachedResultName": "Page 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1i8RBGpcj3DpwdcdB3zJrds7jokW5g_EE05jQlFVct1o/edit#gid=2126901332"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Data/Hora": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}",
+            "Nome": "={{ $('Montar Prompts para IA').item.json.nome }}",
+            "E-mail": "={{ $json.to }}",
+            "Produto": "={{ $('Montar Prompts para IA').item.json.recomendacao.produto }}",
+            "Status": "Não enviado (E-mail inválido)",
+            "Assunto": "={{ $('Tratar Resposta da IA (Parse JSON)').item.json.subject }}",
+            "Saldo": "={{ $('Montar Prompts para IA').item.json.saldo_texto }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Data/Hora",
+              "displayName": "Data/Hora",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Nome",
+              "displayName": "Nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "E-mail",
+              "displayName": "E-mail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Produto",
+              "displayName": "Produto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Saldo",
+              "displayName": "Saldo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assunto",
+              "displayName": "Assunto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        48
+      ],
+      "id": "a87030f0-4fd9-4bd3-8d4d-83a0091d459f",
+      "name": "Registrar Log (E-mail Inválido)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pi1hUfnFhIDP3lTU",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2112,
+        48
+      ],
+      "id": "5d221630-b26c-4295-9c4c-f26ecb02b193",
+      "name": "Retornar Status do Processamento"
+    },
+    {
+      "parameters": {
+        "content": "## 1. CAPTURA E CONSOLIDAÇÃO DE DADOS\n",
+        "height": 432,
+        "width": 784,
+        "color": "#452FE9"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -32,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "36b224de-241d-4eb2-8e8c-c3c937182c26",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## 2. PROCESSAMENTO E I.A",
+        "height": 432,
+        "width": 864,
+        "color": "#EAB162"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        768,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "e6dfba91-850a-4a0c-b337-4fae7b443463",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## 3. VALIDAÇÃO DE DADOS",
+        "height": 432,
+        "width": 192,
+        "color": "#6BBC49"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1648,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "82e87104-4ab7-47cd-942f-239efb861378",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## 4. DISPARO, AUDITORIA E RESPOSTA",
+        "height": 432,
+        "width": 464,
+        "color": "#5840B0"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1856,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "2c3f706d-5247-49c9-9fc6-ef68d3d88626",
+      "name": "Sticky Note3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gatilho - Entrada de Dados": {
+      "main": [
+        [
+          {
+            "node": "Buscar Catálogo de Produtos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Consolidar Dados (Entrada + Produtos)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Catálogo de Produtos": {
+      "main": [
+        [
+          {
+            "node": "Parsear Catálogo JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Catálogo JSON": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Dados (Entrada + Produtos)",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Consolidar Dados (Entrada + Produtos)": {
+      "main": [
+        [
+          {
+            "node": "Mapear Regras de Investimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapear Regras de Investimento": {
+      "main": [
+        [
+          {
+            "node": "Montar Prompts para IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Prompts para IA": {
+      "main": [
+        [
+          {
+            "node": "Gerar Comunicação via IA (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar Comunicação via IA (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Tratar Resposta da IA (Parse JSON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tratar Resposta da IA (Parse JSON)": {
+      "main": [
+        [
+          {
+            "node": "Validar Formato do E-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Formato do E-mail": {
+      "main": [
+        [
+          {
+            "node": "Enviar E-mail ao Cliente (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar Log (E-mail Inválido)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar E-mail ao Cliente (Gmail)": {
+      "main": [
+        [
+          {
+            "node": "Registrar Log (Sucesso)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Log (Sucesso)": {
+      "main": [
+        [
+          {
+            "node": "Retornar Status do Processamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Log (E-mail Inválido)": {
+      "main": [
+        [
+          {
+            "node": "Retornar Status do Processamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retornar Status do Processamento": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "dd0c7238-8da6-40f1-8442-cdb8722bc99d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e440bce7e44a0c15cfb259176b2bbe352f7cacd2664f82c4ba3baecc4f68f971"
+  },
+  "nodeGroups": [],
+  "id": "oOhdpjEyX3m30XfZ",
+  "tags": []
+}
