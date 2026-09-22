@@ -241,7 +241,7 @@ Além dos requisitos solicitados no desafio original, o projeto foi expandido pa
 
 ## 👨‍💻 Autor
 
-Desenvolvido por **Seu Nome Aqui**. Entre em contato ou acompanhe meus projetos:
+Desenvolvido por **Caio Pereira Bauab**. Entre em contato ou acompanhe meus projetos:
 
 - 💼 **LinkedIn:** [(https://www.linkedin.com/in/caio-bauab-032189206/)](https://www.linkedin.com/)
 - 🐙 **GitHub:** [https://github.com/Caiobauab360](https://github.com/)
